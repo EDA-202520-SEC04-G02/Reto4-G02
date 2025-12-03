@@ -106,13 +106,11 @@ def load_data(catalog, filename):
     """
     # TODO DONE: Realizar la carga de datos
     
-    start_time = time.perf_counter()
-
     start = time.perf_counter()
 
     events_by_tag = catalog["events_by_tag"]
 
-    # Lista global de todos los eventos (para crear vértices)
+    # Lista global de todos los eventos (para crear vértices y arcos)
     all_events = lt.new_list()
 
     with open(filename, encoding="utf-8") as file:
@@ -129,20 +127,24 @@ def load_data(catalog, filename):
                 "dist_agua_km": float(row["comments"]) / 1000.0
             }
 
+            # Agregar a lista global
             lt.add_last(all_events, event)
 
-            # Agregar el evento a la lista de su tag
+            # Agregar el evento a la lista de su tag (para futuros reqs)
             tag_events = mp.get(events_by_tag, event["tag"])
             if tag_events is None:
                 tag_events = lt.new_list()
                 mp.put(events_by_tag, event["tag"], tag_events)
             lt.add_last(tag_events, event)
 
-    # Construir vértices (puntos migratorios)
+    # Ordenar globalmente todos los eventos por tiempo (UNA sola vez)
+    all_events = lt.merge_sort(all_events, cmp_event_time)
+
+    # Construir vértices (puntos migratorios) usando la lista ya ordenada
     build_vertices(catalog, all_events)
 
-    # Construir arcos de los dos grafos
-    build_edges(catalog)
+    # Construir arcos de los dos grafos usando la misma lista ordenada
+    build_edges(catalog, all_events)
 
     elapsed = time.perf_counter() - start
     return elapsed
@@ -266,9 +268,6 @@ def build_vertices(catalog, all_events):
     vertices_order = catalog["vertices_order"]
     event_to_vertex = catalog["event_to_vertex"]
 
-    # Ordenar todos los eventos por tiempo
-    all_events = lt.merge_sort(all_events, cmp_event_time)
-
     num_events = lt.size(all_events)
     first_active_idx = 0  # índice del primer vértice potencialmente activo
 
@@ -315,7 +314,7 @@ def build_vertices(catalog, all_events):
 # Construcción de arcos
 # ----------------------------------------------------
 
-def build_edges(catalog):
+def build_edges(catalog, all_events):
     """
     Recorre los eventos de cada grulla (tag-local-identifier) en orden
     temporal, detecta viajes A->B entre puntos migratorios y construye
@@ -329,77 +328,73 @@ def build_edges(catalog):
     Al final se agrega un solo arco A->B en cada grafo con el promedio
     correspondiente.
     """
-    events_by_tag = catalog["events_by_tag"]
-    vertices_info = catalog["vertices_info"]
+    vertices_info   = catalog["vertices_info"]
     event_to_vertex = catalog["event_to_vertex"]
-    g_dist = catalog["graph_dist"]
-    g_agua = catalog["graph_agua"]
+    g_dist          = catalog["graph_dist"]
+    g_agua          = catalog["graph_agua"]
 
     # Mapa local: (A, B) -> {"sum_dist": ..., "sum_agua": ..., "count": ...}
-    edge_stats = mp.new_map(1000, 0.5)
+    edge_stats = mp.new_map(23000, 0.5)
 
-    # Recorrer todos los tags
-    tag_keys = mp.key_set(events_by_tag)
-    num_tags = lt.size(tag_keys)
+    # Mapa tag -> último vértice visitado por esa grulla
+    last_vertex_by_tag = mp.new_map(23000, 0.5)
 
-    for i in range(num_tags):
-        tag = lt.get_element(tag_keys, i)
-        events = mp.get(events_by_tag, tag)
+    num_events = lt.size(all_events)
+    for i in range(num_events):
+        e = lt.get_element(all_events, i)
+        tag   = e["tag"]
+        ev_id = e["event_id"]
 
-        # Ordenar eventos de esta grulla por tiempo
-        events = lt.merge_sort(events, cmp_event_time)
-        mp.put(events_by_tag, tag, events)
+        curr_vertex = mp.get(event_to_vertex, ev_id)
+        if curr_vertex is None:
+            continue
 
-        prev_vertex = None
-        num_events = lt.size(events)
+        prev_vertex = mp.get(last_vertex_by_tag, tag)
 
-        for j in range(num_events):
-            event = lt.get_element(events, j)
-            curr_vertex = mp.get(event_to_vertex, event["event_id"])
+        # Primer evento de este tag
+        if prev_vertex is None:
+            mp.put(last_vertex_by_tag, tag, curr_vertex)
+            continue
 
-            if prev_vertex is None:
-                prev_vertex = curr_vertex
-                continue
+        # Sigue en el mismo vértice, no hay viaje
+        if curr_vertex == prev_vertex:
+            mp.put(last_vertex_by_tag, tag, curr_vertex)
+            continue
 
-            # Si sigue en el mismo vértice, no hay viaje
-            if curr_vertex == prev_vertex:
-                continue
+        # Hay un viaje A -> B
+        A = prev_vertex
+        B = curr_vertex
 
-            # Hay un viaje A -> B
-            A = prev_vertex
-            B = curr_vertex
+        vA = mp.get(vertices_info, A)
+        vB = mp.get(vertices_info, B)
 
-            vA = mp.get(vertices_info, A)
-            vB = mp.get(vertices_info, B)
+        dist_km = haversine(vA["lat"], vA["lon"], vB["lat"], vB["lon"])
+        agua_B  = vB["avg_agua"]
 
-            dist_km = haversine(vA["lat"], vA["lon"], vB["lat"], vB["lon"])
-            agua_B = vB["avg_agua"]
+        key   = (A, B)
+        stats = mp.get(edge_stats, key)
+        if stats is None:
+            stats = {
+                "sum_dist": dist_km,
+                "sum_agua": agua_B,
+                "count": 1
+            }
+        else:
+            stats["sum_dist"] += dist_km
+            stats["sum_agua"] += agua_B
+            stats["count"]    += 1
 
-            key = (A, B)
-            stats = mp.get(edge_stats, key)
-            if stats is None:
-                stats = {
-                    "sum_dist": dist_km,
-                    "sum_agua": agua_B,
-                    "count": 1
-                }
-            else:
-                stats["sum_dist"] += dist_km
-                stats["sum_agua"] += agua_B
-                stats["count"] += 1
-
-            mp.put(edge_stats, key, stats)
-
-            prev_vertex = curr_vertex
+        mp.put(edge_stats, key, stats)
+        mp.put(last_vertex_by_tag, tag, curr_vertex)
 
     # Crear arcos a partir de los promedios acumulados
     edge_keys = mp.key_set(edge_stats)
     num_edges = lt.size(edge_keys)
 
     for i in range(num_edges):
-        key = lt.get_element(edge_keys, i)
+        key   = lt.get_element(edge_keys, i)
         stats = mp.get(edge_stats, key)
-        A, B = key
+        A, B  = key
 
         avg_dist = stats["sum_dist"] / stats["count"]
         avg_agua = stats["sum_agua"] / stats["count"]

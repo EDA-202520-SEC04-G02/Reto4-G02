@@ -34,10 +34,11 @@ def load_data(control):
     Carga los datos
     """
     #TODO DONE: Realizar la carga de datos
-    # file_name = "1000_cranes_mongolia_large.csv"
     # file_name = "1000_cranes_mongolia_small.csv"
     # file_name = "1000_cranes_mongolia_30pct.csv"
-    file_name = "1000_cranes_mongolia_80pct.csv"
+    # file_name = "1000_cranes_mongolia_80pct.csv"
+    file_name = "1000_cranes_mongolia_large.csv"
+
     file_path = data_dir + file_name
 
     elapsed = logic.load_data(control, file_path)
