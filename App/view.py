@@ -34,7 +34,10 @@ def load_data(control):
     Carga los datos
     """
     #TODO DONE: Realizar la carga de datos
-    file_name = "1000_cranes_mongolia_small.csv"
+    # file_name = "1000_cranes_mongolia_large.csv"
+    # file_name = "1000_cranes_mongolia_small.csv"
+    # file_name = "1000_cranes_mongolia_30pct.csv"
+    file_name = "1000_cranes_mongolia_80pct.csv"
     file_path = data_dir + file_name
 
     elapsed = logic.load_data(control, file_path)
@@ -94,8 +97,45 @@ def print_req_1(control):
     """
         Función que imprime la solución del Requerimiento 1 en consola
     """
-    # TODO: Imprimir el resultado del requerimiento 1
-    pass
+    # TODO DONE: Imprimir el resultado del requerimiento 1
+    print("\n=== REQ. 1: Camino de un individuo ===")
+    tag_id = input("Identificador del individuo (tag-local-identifier): ").strip()
+
+    lat_o = float(input("Latitud del punto de origen: "))
+    lon_o = float(input("Longitud del punto de origen: "))
+    lat_d = float(input("Latitud del punto de destino: "))
+    lon_d = float(input("Longitud del punto de destino: "))
+
+    result = logic.req_1(control, lat_o, lon_o, lat_d, lon_d, tag_id)
+
+    print("\n" + result["mensaje"])
+
+    if not result["ok"]:
+        print(f"Origen aproximado: {result['origen']}")
+        print(f"Destino aproximado: {result['destino']}")
+        return
+
+    print(f"\nPunto migratorio de origen (más cercano): {result['origen']}")
+    print(f"Punto migratorio de destino (más cercano): {result['destino']}")
+    print(f"Individuo: {result['individuo']}")
+    print(f"Distancia total del camino: {result['distancia_total_km']:.4f} km")
+    print(f"Total de puntos en la ruta: {result['total_puntos']}")
+
+    ruta = result["ruta"]
+    if not ruta:
+        print("\nNo se pudo construir la ruta.")
+        return
+
+    # Primeros y últimos 5 vértices de la ruta
+    n = 5
+    primeros = ruta[:n]
+    ultimos = ruta[-n:] if len(ruta) > n else ruta
+
+    print("\n--- Primeros 5 vértices de la ruta ---\n")
+    print(tabulate(primeros, headers="keys", tablefmt="grid"))
+
+    print("\n--- Últimos 5 vértices de la ruta ---\n")
+    print(tabulate(ultimos, headers="keys", tablefmt="grid"))
 
 
 def print_req_2(control):
