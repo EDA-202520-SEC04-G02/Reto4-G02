@@ -1,12 +1,22 @@
+# -------------------------------------------
 import sys
+import App.logic as logic
+from tabulate import tabulate 
+import os
+data_dir = os.path.dirname(os.path.realpath('__file__')) + '/Data/'
+from DataStructures.List import array_list as lt
+from DataStructures.Map import map_linear_probing as mp
+# -------------------------------------------
 
 
 def new_logic():
     """
         Se crea una instancia del controlador
     """
-    #TODO: Llamar la función de la lógica donde se crean las estructuras de datos
-    pass
+    #TODO DONE: Llamar la función de la lógica donde se crean las estructuras de datos
+    control = logic.new_logic()
+    return control
+
 
 def print_menu():
     print("Bienvenido")
@@ -23,16 +33,62 @@ def load_data(control):
     """
     Carga los datos
     """
-    #TODO: Realizar la carga de datos
-    pass
+    #TODO DONE: Realizar la carga de datos
+    file_name = "1000_cranes_mongolia_small.csv"
+    file_path = data_dir + file_name
 
+    elapsed = logic.load_data(control, file_path)
 
-def print_data(control, id):
-    """
-        Función que imprime un dato dado su ID
-    """
-    #TODO: Realizar la función para imprimir un elemento
-    pass
+    graph_dist = control["graph_dist"]
+    graph_agua = control["graph_agua"]
+    events_by_tag = control["events_by_tag"]
+
+    # Total de grullas reconocidas = número de llaves del mapa events_by_tag
+    total_grullas = mp.size(events_by_tag)
+
+    # Total de eventos cargados = suma de tamaños de las listas por tag
+    total_eventos = 0
+    tag_keys = mp.key_set(events_by_tag)
+    for i in range(lt.size(tag_keys)):
+        tag = lt.get_element(tag_keys, i)
+        ev_list = mp.get(events_by_tag, tag)
+        total_eventos += lt.size(ev_list)
+
+    # Número de nodos (vértices) = tamaño del mapa de vértices del grafo
+    num_vertices = mp.size(graph_dist["vertices"])
+
+    # Número de arcos en cada grafo
+    num_edges_dist = graph_dist["num_edges"]
+    num_edges_agua = graph_agua["num_edges"]
+
+    print("\n=======================================")
+    print("           CARGA DE DATOS              ")
+    print("=======================================")
+    print(f"Total de grullas reconocidas: {total_grullas}")
+    print(f"Total de eventos cargados:    {total_eventos}")
+    print(f"Total de nodos del grafo:     {num_vertices}")
+    print(f"Total de arcos (distancia):   {num_edges_dist}")
+    print(f"Total de arcos (agua):        {num_edges_agua}")
+    print(f"Tiempo total de carga:        {elapsed:.3f} segundos")
+
+    # Mostrar primeros y últimos vértices
+    first, last = logic.get_vertices_samples(control, n=5)
+
+    print("\n=======================================")
+    print("      DETALLE DE NODOS (VÉRTICES)      ")
+    print("=======================================\n")
+
+    if first:
+        print("--- Primeros 5 Nodos ---\n")
+        print(tabulate(first, headers="keys", tablefmt="grid"))
+        print()
+
+    if last:
+        print("--- Últimos 5 Nodos ---\n")
+        print(tabulate(last, headers="keys", tablefmt="grid"))
+        print()
+
+    return elapsed
 
 def print_req_1(control):
     """
