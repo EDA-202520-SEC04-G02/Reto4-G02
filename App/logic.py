@@ -96,6 +96,33 @@ def find_closest_vertex(catalog, lat, lon):
 
     return best_id, best_dist
 
+def find_closest_vertex_on_route(route_vertices, vertices_info, lat, lon):
+    """
+    Retorna el vértice de route_vertices más cercano a (lat, lon)
+    junto con su índice en la ruta y la distancia Haversine.
+
+    route_vertices: lista TDA (array_list) con ids de vértice.
+    """
+    size = lt.size(route_vertices)
+    best_idx = None
+    best_id = None
+    best_dist = None
+
+    for i in range(size):
+        v_id = lt.get_element(route_vertices, i)
+        v = mp.get(vertices_info, v_id)
+        if v is None:
+            continue
+
+        d = haversine(lat, lon, v["lat"], v["lon"])
+        if best_dist is None or d < best_dist:
+            best_dist = d
+            best_id = v_id
+            best_idx = i
+
+    return best_id, best_idx, best_dist
+
+
 # ----------------------------------------------------
 # Funciones para la carga de datos
 # ----------------------------------------------------
@@ -154,14 +181,6 @@ def load_data(catalog, filename):
 # ----------------------------------------------------
 
 def find_vertex_for_event_window(vertices_info, vertices_order, first_active_idx, event):
-    """
-    Busca un vértice compatible para el evento solo entre los vértices
-    cuyo índice está en [first_active_idx, num_vertices).
-
-    Condiciones:
-      - distancia Haversine < 3 km
-      - diferencia de tiempo (event.time - creation_time) < 3 h
-    """
     num_vertices = lt.size(vertices_order)
 
     for i in range(first_active_idx, num_vertices):
@@ -169,17 +188,10 @@ def find_vertex_for_event_window(vertices_info, vertices_order, first_active_idx
         v = mp.get(vertices_info, v_id)
 
         dist_km = haversine(event["lat"], event["lon"], v["lat"], v["lon"])
-        if dist_km >= 3.0:
-            continue
-
-        hours = (event["time"] - v["creation_time"]).total_seconds() / 3600.0
-        if hours >= 3.0:
-            continue
-
-        return v_id
+        if dist_km < 3.0:
+            return v_id
 
     return None
-
 
 def create_vertex_for_event(catalog, event):
     """
@@ -545,12 +557,23 @@ def dfs_path_individual(graph, source, dest):
 
 def req_1(catalog, lat_origen, lon_origen, lat_destino, lon_destino, tag_id):
     """
-    Retorna el resultado del requerimiento 1
+    REQ.1 – Detectar el camino de un individuo (grulla) entre dos puntos migratorios.
+
+    Estrategia:
+    1. Verificar que el individuo exista (events_by_tag).
+    2. Ordenar sus eventos por tiempo.
+    3. Convertir esos eventos en una ruta de vértices (puntos migratorios) usando event_to_vertex,
+       eliminando repeticiones consecutivas.
+    4. Elegir ORIGEN y DESTINO como los vértices de ESA ruta más cercanos a las coordenadas dadas
+       (Haversine sobre la ruta del individuo).
+    5. Construir un grafo dirigido g_ind con los movimientos consecutivos de esa grulla.
+    6. Ejecutar DFS.dfs(g_ind, origen_id) y verificar conectividad con DFS.has_path_to.
+    7. Reconstruir el camino como el segmento de la ruta entre origen y destino
+       (índices en la lista de ruta) y calcular distancias.
     """
-    # TODO Done : Modificar el requerimiento 1
-    vertices_info = catalog["vertices_info"]
-    vertices_order = catalog["vertices_order"]
-    events_by_tag = catalog["events_by_tag"]
+
+    vertices_info   = catalog["vertices_info"]
+    events_by_tag   = catalog["events_by_tag"]
     event_to_vertex = catalog["event_to_vertex"]
 
     # 1. Verificar que exista el individuo
@@ -561,125 +584,184 @@ def req_1(catalog, lat_origen, lon_origen, lat_destino, lon_destino, tag_id):
             "mensaje": f"El individuo {tag_id} no se encuentra en los datos.",
             "origen": None,
             "destino": None,
+            "individuo": tag_id,
+            "distancia_total_km": 0.0,
+            "total_puntos": 0,
             "ruta": []
         }
 
-    # 2. Encontrar puntos migratorios de origen y destino más cercanos
-    origen_id, dist_o = find_closest_vertex(catalog, lat_origen, lon_origen)
-    destino_id, dist_d = find_closest_vertex(catalog, lat_destino, lon_destino)
-
-    if origen_id is None or destino_id is None:
-        return {
-            "ok": False,
-            "mensaje": "No se encontraron puntos migratorios en el catálogo.",
-            "origen": origen_id,
-            "destino": destino_id,
-            "ruta": []
-        }
-
-    # 3. Comprobar que el individuo pasa por esos puntos (opcional pero útil)
-    v_origen = mp.get(vertices_info, origen_id)
-    v_dest = mp.get(vertices_info, destino_id)
-
-    if not list_contains_str(v_origen["tags"], tag_id) or not list_contains_str(v_dest["tags"], tag_id):
-        return {
-            "ok": False,
-            "mensaje": f"El individuo {tag_id} no transita por el punto de origen y/o destino.",
-            "origen": origen_id,
-            "destino": destino_id,
-            "ruta": []
-        }
-
-    # 4. Construir grafo dirigido solo con movimientos de este individuo
-    #    Vértices: puntos migratorios por los que pasa
-    #    Arcos: movimientos consecutivos entre vértices (en orden temporal)
+    # 2. Ordenar los eventos de este individuo por tiempo (aprovechando el TDA)
     eventos_tag = lt.merge_sort(eventos_tag, cmp_event_time)
+    mp.put(events_by_tag, tag_id, eventos_tag)  # opcional, dejas guardado ordenado
 
-    g_ind = G.new_graph(50)  # tamaño inicial, se puede ajustar
-
-    prev_v = None
+    # 3. Construir la ruta de vértices (puntos migratorios) para este individuo
+    #    en orden temporal, sin repeticiones consecutivas.
+    route_vertices = lt.new_list()  # TDA array_list
     num_eventos = lt.size(eventos_tag)
 
     for i in range(num_eventos):
         e = lt.get_element(eventos_tag, i)
         ev_id = e["event_id"]
         v_id = mp.get(event_to_vertex, ev_id)
-
         if v_id is None:
             continue
 
-        # Insertar vértice en grafo individual (no duplica si ya existe)
+        rv_size = lt.size(route_vertices)
+        if rv_size == 0:
+            lt.add_last(route_vertices, v_id)
+        else:
+            last_v = lt.get_element(route_vertices, rv_size - 1)
+            if last_v != v_id:
+                lt.add_last(route_vertices, v_id)
+
+    if lt.size(route_vertices) == 0:
+        return {
+            "ok": False,
+            "mensaje": f"El individuo {tag_id} no tiene puntos migratorios asociados.",
+            "origen": None,
+            "destino": None,
+            "individuo": tag_id,
+            "distancia_total_km": 0.0,
+            "total_puntos": 0,
+            "ruta": []
+        }
+
+    # 4. Encontrar ORIGEN y DESTINO como vértices de LA RUTA
+    origen_id, idx_origen, dist_o = find_closest_vertex_on_route(
+        route_vertices, vertices_info, lat_origen, lon_origen
+    )
+    destino_id, idx_destino, dist_d = find_closest_vertex_on_route(
+        route_vertices, vertices_info, lat_destino, lon_destino
+    )
+
+    if origen_id is None or destino_id is None:
+        return {
+            "ok": False,
+            "mensaje": ("No fue posible asociar las coordenadas de origen y/o destino "
+                        "a puntos migratorios recorridos por el individuo."),
+            "origen": origen_id,
+            "destino": destino_id,
+            "individuo": tag_id,
+            "distancia_total_km": 0.0,
+            "total_puntos": 0,
+            "ruta": []
+        }
+
+    # La ruta del individuo es temporalmente dirigida: solo tiene sentido ir
+    # de un índice menor a uno mayor.
+    if idx_origen > idx_destino:
+        return {
+            "ok": False,
+            "mensaje": ("Según la secuencia temporal del individuo, el punto más cercano "
+                        "al ORIGEN ocurre después del punto más cercano al DESTINO; "
+                        "no hay un camino en esa dirección."),
+            "origen": origen_id,
+            "destino": destino_id,
+            "individuo": tag_id,
+            "distancia_total_km": 0.0,
+            "total_puntos": 0,
+            "ruta": []
+        }
+
+    # 5. Construir grafo dirigido SOLO con los movimientos de este individuo
+    size_r = lt.size(route_vertices)
+    g_ind = G.new_graph(max(50, size_r))
+
+    # Insertar vértices
+    for i in range(size_r):
+        v_id = lt.get_element(route_vertices, i)
         G.insert_vertex(g_ind, v_id, None)
 
-        # Crear arco desde el vértice anterior si cambia de punto
-        if prev_v is not None and v_id != prev_v:
-            vA = mp.get(vertices_info, prev_v)
-            vB = mp.get(vertices_info, v_id)
-            d = haversine(vA["lat"], vA["lon"], vB["lat"], vB["lon"])
-            G.add_edge(g_ind, prev_v, v_id, d)
+    # Insertar arcos entre consecutivos
+    for i in range(size_r - 1):
+        A = lt.get_element(route_vertices, i)
+        B = lt.get_element(route_vertices, i + 1)
+        if A == B:
+            continue
 
-        prev_v = v_id
+        vA = mp.get(vertices_info, A)
+        vB = mp.get(vertices_info, B)
+        if vA is None or vB is None:
+            continue
 
-    # Verificar que origen y destino estén en el grafo de este individuo
-    if not mp.contains(g_ind["vertices"], origen_id) or not mp.contains(g_ind["vertices"], destino_id):
+        d = haversine(vA["lat"], vA["lon"], vB["lat"], vB["lon"])
+        G.add_edge(g_ind, A, B, d)
+
+    # 6. Ejecutar DFS del módulo importado desde ORIGEN
+    search = DFS.dfs(g_ind, origen_id)
+
+    if not DFS.has_path_to(destino_id, search):
         return {
             "ok": False,
-            "mensaje": f"El individuo {tag_id} no tiene registros en el origen y/o destino seleccionados.",
+            "mensaje": (f"No se encontró un camino DFS viable entre los puntos migratorios "
+                        f"{origen_id} (origen) y {destino_id} (destino) para el individuo {tag_id}."),
             "origen": origen_id,
             "destino": destino_id,
+            "individuo": tag_id,
+            "distancia_total_km": 0.0,
+            "total_puntos": 0,
             "ruta": []
         }
 
-    # 5. Ejecutar DFS para encontrar un camino desde origen hasta destino
-    path = dfs_path_individual(g_ind, origen_id, destino_id)
+    # 7. Reconstruir el camino usando los índices de la ruta temporal
+    #    (no usamos DFS.path_to porque solo devuelve el vértice final).
+    path_ids = []
+    for i in range(idx_origen, idx_destino + 1):
+        path_ids.append(lt.get_element(route_vertices, i))
 
-    if path is None:
-        return {
-            "ok": False,
-            "mensaje": f"No se encontró un camino DFS viable entre {origen_id} y {destino_id} para el individuo {tag_id}.",
-            "origen": origen_id,
-            "destino": destino_id,
-            "ruta": []
-        }
-
-    # 6. Construir información de la ruta
+    # Calcular distancia total y armar la info de cada vértice
     ruta_info = []
     distancia_total = 0.0
 
-    for idx, v_id in enumerate(path):
+    for idx, v_id in enumerate(path_ids):
         v = mp.get(vertices_info, v_id)
 
-        # Distancia al siguiente punto en la ruta
-        if idx < len(path) - 1:
-            v_next = mp.get(vertices_info, path[idx + 1])
-            d_next = haversine(v["lat"], v["lon"], v_next["lat"], v_next["lon"])
+        if v is None:
+            latlon_str = "Unknown"
+            num_grullas = "Unknown"
+            tags_str = "Unknown"
+        else:
+            latlon_str = f"({v['lat']}, {v['lon']})"
+            num_grullas = lt.size(v["tags"]) if v["tags"] is not None else 0
+            tags_str = tags_first_last_3(v["tags"]) if v["tags"] is not None else "Unknown"
+
+        # Distancia al siguiente punto de la ruta
+        if idx < len(path_ids) - 1:
+            v_next = mp.get(vertices_info, path_ids[idx + 1])
+            if v is not None and v_next is not None:
+                d_next = haversine(v["lat"], v["lon"], v_next["lat"], v_next["lon"])
+            else:
+                d_next = 0.0
         else:
             d_next = 0.0
 
         distancia_total += d_next
 
         fila = {
-            "ID punto": v["id"],
-            "Posición (lat, lon)": f"({v['lat']}, {v['lon']})",
-            "Num. grullas": lt.size(v["tags"]),
-            "Tags (3 primeros y 3 últimos)": tags_first_last_3(v["tags"]),
+            "ID punto": v_id if v_id is not None else "Unknown",
+            "Posición (lat, lon)": latlon_str,
+            "Num. grullas": num_grullas,
+            "Tags (3 primeros y 3 últimos)": tags_str,
             "Distancia al siguiente (km)": round(d_next, 4)
         }
         ruta_info.append(fila)
 
     resultado = {
         "ok": True,
-        "mensaje": f"El primer nodo del camino para el individuo {tag_id} es el punto migratorio {path[0]}.",
+        "mensaje": (
+            f"El primer nodo del camino para el individuo {tag_id} es el punto migratorio {path_ids[0]}. "
+            f"Se encontró un camino DFS desde {origen_id} (origen aproximado) hasta "
+            f"{destino_id} (destino aproximado) sobre la ruta del individuo."
+        ),
         "origen": origen_id,
         "destino": destino_id,
         "individuo": tag_id,
-        "distancia_total_km": distancia_total,
-        "total_puntos": len(path),
+        "distancia_total_km": round(distancia_total, 4),
+        "total_puntos": len(path_ids),
         "ruta": ruta_info
     }
 
     return resultado
-
 
 def req_2(catalog):
     """
