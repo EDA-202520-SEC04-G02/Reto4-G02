@@ -145,14 +145,78 @@ def print_req_1(control):
     print("\n--- Últimos 5 vértices de la ruta ---\n")
     print(tabulate(ultimos, headers="keys", tablefmt="grid"))
 
-
 def print_req_2(control):
     """
         Función que imprime la solución del Requerimiento 2 en consola
     """
-    # TODO: Imprimir el resultado del requerimiento 2
-    pass
+    print("\n=== REQ. 2: Movimientos de un nicho biológico alrededor de un área ===")
 
+    lat_o = float(input("Latitud del punto de origen: "))
+    lon_o = float(input("Longitud del punto de origen: "))
+    lat_d = float(input("Latitud del punto de destino: "))
+    lon_d = float(input("Longitud del punto de destino: "))
+    radio = float(input("Radio del área de interés (km): "))
+
+    result = logic.req_2(control, lat_o, lon_o, lat_d, lon_d, radio)
+
+    # Tiempo de ejecución (si viene en el resultado)
+    if "tiempo_ms" in result:
+        print(f"\nTiempo de ejecución del requerimiento 2: {result['tiempo_ms']:.3f} ms")
+
+    # Si falla, mensaje simple y salimos
+    if not result["success"]:
+        print("\nNo se pudo encontrar un camino viable para el requerimiento 2.")
+        print(f"Vértice de origen aproximado: {result.get('origin_vertex', 'Unknown')}")
+        print(f"Vértice de destino aproximado: {result.get('dest_vertex', 'Unknown')}")
+        if "error" in result:
+            print("Detalle:", result["error"])
+        return
+
+    # Éxito: resumen básico
+    print(f"\nVértice de origen (más cercano): {result['origin_vertex']}")
+    print(f"Vértice de destino (más cercano): {result['dest_vertex']}")
+    print(f"Distancia total de desplazamiento: {result['total_distance_km']:.4f} km")
+    print(f"Total de puntos en el camino: {result['total_points']}")
+
+    # Mensaje sobre el último nodo dentro del área de interés
+    last_inside = result["last_inside_vertex"]
+    radio_km = result["radio_km"]
+
+    if last_inside is None:
+        msg_area = (
+            f"Ningún nodo de la ruta se encuentra dentro del área de interés "
+            f"de radio {radio_km} km alrededor del origen."
+        )
+    else:
+        msg_area = (
+            f"El último nodo dentro del área de interés (radio {radio_km} km) "
+            f"es el vértice con id: {last_inside}."
+        )
+
+    print("\n" + msg_area)
+
+    # Función auxiliar para convertir lista TDA a lista Python
+    def tda_to_py_list(tda_list):
+        rows = []
+        n = lt.size(tda_list)
+        for i in range(n):
+            rows.append(lt.get_element(tda_list, i))
+        return rows
+
+    primeros = tda_to_py_list(result["first_vertices"])
+    ultimos  = tda_to_py_list(result["last_vertices"])
+
+    print("\n--- Cinco primeros vértices de la ruta ---\n")
+    if primeros:
+        print(tabulate(primeros, headers="keys", tablefmt="grid"))
+    else:
+        print("No hay vértices para mostrar.")
+
+    print("\n--- Cinco últimos vértices de la ruta ---\n")
+    if ultimos:
+        print(tabulate(ultimos, headers="keys", tablefmt="grid"))
+    else:
+        print("No hay vértices para mostrar.")
 
 def print_req_3(control):
     """
