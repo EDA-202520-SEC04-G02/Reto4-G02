@@ -190,7 +190,7 @@ def print_req_4(control):
     ruta = result["ruta_completa"]
     if not ruta:
         print("\nNo se pudo construir el corredor migratorio.")
-        returnks
+        return
 
     n = 5
     total = len(ruta)
