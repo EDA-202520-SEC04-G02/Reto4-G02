@@ -73,7 +73,7 @@ def load_data(control):
     print(f"Total de nodos del grafo:     {num_vertices}")
     print(f"Total de arcos (distancia):   {num_edges_dist}")
     print(f"Total de arcos (agua):        {num_edges_agua}")
-    print(f"Tiempo total de carga:        {elapsed:.3f} segundos")
+    print(f"Tiempo total de carga:        {elapsed:.3f} ms")
 
     # Mostrar primeros y últimos vértices
     first, last = logic.get_vertices_samples(control, n=5)
@@ -98,8 +98,8 @@ def print_req_1(control):
     """
         Función que imprime la solución del Requerimiento 1 en consola
     """
-    # TODO DONE: Imprimir el resultado del requerimiento 1
     print("\n=== REQ. 1: Camino de un individuo ===")
+    
     tag_id = input("Identificador del individuo (tag-local-identifier): ").strip()
 
     lat_o = float(input("Latitud del punto de origen: "))
@@ -108,7 +108,7 @@ def print_req_1(control):
     lon_d = float(input("Longitud del punto de destino: "))
 
     result = logic.req_1(control, lat_o, lon_o, lat_d, lon_d, tag_id)
-
+    print(f"Tiempo de ejecución del requerimiento 1: {result['tiempo_ms']:.3f} ms")
     print("\n" + result["mensaje"])
 
     if not result["ok"]:
@@ -122,15 +122,22 @@ def print_req_1(control):
     print(f"Distancia total del camino: {result['distancia_total_km']:.4f} km")
     print(f"Total de puntos en la ruta: {result['total_puntos']}")
 
-    ruta = result["ruta"]
+    # Usamos la ruta completa que devuelve la lógica
+    ruta = result["ruta_completa"]
     if not ruta:
         print("\nNo se pudo construir la ruta.")
         return
 
-    # Primeros y últimos 5 vértices de la ruta
     n = 5
-    primeros = ruta[:n]
-    ultimos = ruta[-n:] if len(ruta) > n else ruta
+    total = len(ruta)
+
+    if total <= n:
+        # Pocos puntos: mostramos todo como “primeros” y todo como “últimos”
+        primeros = ruta
+        ultimos = ruta
+    else:
+        primeros = ruta[0:n]
+        ultimos = ruta[-n:]
 
     print("\n--- Primeros 5 vértices de la ruta ---\n")
     print(tabulate(primeros, headers="keys", tablefmt="grid"))
@@ -209,7 +216,7 @@ def main():
         elif int(inputs) == 5:
             print_req_5(control)
 
-        elif int(inputs) == 5:
+        elif int(inputs) == 6:
             print_req_6(control)
 
         elif int(inputs) == 7:
