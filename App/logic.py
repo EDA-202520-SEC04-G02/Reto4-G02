@@ -17,7 +17,7 @@ from DataStructures.Graph import dijsktra_structure as DIJ
 # ----------------------------------------------------
 def new_logic():
     """
-    Crea el catalogo para almacenar las estructuras de datos
+    Crea el catalogo para almacenar las estructuras de datos    
     """
     #TODO DONE: Llama a las funciónes de creación de las estructuras de datos
     catalog = {
@@ -763,12 +763,203 @@ def req_1(catalog, lat_origen, lon_origen, lat_destino, lon_destino, tag_id):
 
     return resultado
 
-def req_2(catalog):
+
+
+def bfs_path_from_visited(visited_map, source, dest):
+    """
+    Reconstruye el camino [source, ..., dest] usando visited_map (TDA map)
+    retornado por BFS.bfs.
+    Retorna una lista TDA array_list (lt) o None si no existe camino.
+    """
+
+    if not mp.contains(visited_map, dest):
+        return None
+
+    
+    temp_path = lt.new_list()
+    current = dest
+
+    while current is not None:
+        lt.add_last(temp_path, current)
+        info = mp.get(visited_map, current)
+        current = info["edge_from"]
+
+    
+    stack_rev = st.new_stack()
+    size_temp = lt.size(temp_path)
+
+    i = 0
+    while i < size_temp:
+        elem = lt.get_element(temp_path, i)
+        st.push(stack_rev, elem)
+        i += 1
+
+    path = lt.new_list()
+    while not st.is_empty(stack_rev):
+        lt.add_last(path, st.pop(stack_rev))
+
+    
+    if lt.size(path) == 0 or lt.get_element(path, 0) != source:
+        return None
+
+    return path
+
+
+def req_2(catalog, lat_origen, lon_origen, lat_destino, lon_destino, radio_km):
     """
     Retorna el resultado del requerimiento 2
     """
     # TODO: Modificar el requerimiento 2
-    pass
+
+    vertices_info = catalog["vertices_info"]
+    graph_dist = catalog["graph_dist"]
+
+   
+    origin_id, _ = find_closest_vertex(catalog, lat_origen, lon_origen)
+    dest_id, _ = find_closest_vertex(catalog, lat_destino, lon_destino)
+
+    if origin_id is None or dest_id is None:
+        return {
+            "success": False,
+            "message": "No se encontraron puntos migratorios cercanos para el origen o el destino.",
+            "origin_vertex": origin_id if origin_id is not None else "Unknown",
+            "dest_vertex": dest_id if dest_id is not None else "Unknown"
+        }
+
+    
+    visited_map = BFS.bfs(graph_dist, origin_id)
+
+    
+    path = bfs_path_from_visited(visited_map, origin_id, dest_id)
+    if path is None:
+        return {
+            "success": False,
+            "message": "No existe un camino viable entre los puntos migratorios de origen y destino.",
+            "origin_vertex": origin_id,
+            "dest_vertex": dest_id
+        }
+
+    total_points = lt.size(path)
+
+    
+    dist_to_next = lt.new_list()   
+    total_distance = 0.0
+
+    i = 0
+    while i < total_points - 1:
+        u = lt.get_element(path, i)
+        v = lt.get_element(path, i + 1)
+
+        edges_map = G.edges_vertex(graph_dist, u)
+        peso_uv = None
+
+        if edges_map is not None:
+            edge_uv = mp.get(edges_map, v)
+            if edge_uv is not None:
+                w = EDG.weight(edge_uv)
+                if w is not None:
+                    peso_uv = w
+                    total_distance += w
+
+        lt.add_last(dist_to_next, peso_uv)
+        i += 1
+
+    
+    lt.add_last(dist_to_next, None)
+
+    
+    v_origin = mp.get(vertices_info, origin_id)
+    lat0 = v_origin["lat"]
+    lon0 = v_origin["lon"]
+
+    last_inside_vertex = None
+
+    i = 0
+    while i < total_points:
+        vid = lt.get_element(path, i)
+        vinfo = mp.get(vertices_info, vid)
+        d_km = haversine(lat0, lon0, vinfo["lat"], vinfo["lon"])
+        if d_km <= radio_km:
+            last_inside_vertex = vid
+        i += 1
+
+    if last_inside_vertex is None:
+        last_inside_msg = (
+            "Ningún nodo de la ruta se encuentra dentro del área de interés "
+            + "de radio " + str(radio_km) + " km alrededor del origen."
+        )
+    else:
+        last_inside_msg = (
+            "El último nodo dentro del área de interés (radio "
+            + str(radio_km) + " km) es el vértice con id: "
+            + str(last_inside_vertex) + "."
+        )
+
+    
+
+    def build_vertex_entry(idx):
+        vid = lt.get_element(path, idx)
+        vinfo = mp.get(vertices_info, vid)
+
+        
+        entry_id = vinfo["id"] if "id" in vinfo else vid
+        entry_lat = vinfo["lat"] if "lat" in vinfo else "Unknown"
+        entry_lon = vinfo["lon"] if "lon" in vinfo else "Unknown"
+
+        tags_list = vinfo["tags"]
+        num_grullas = lt.size(tags_list)
+        tags_sample = tags_first_last_3(tags_list)  
+
+       
+        d_seg = lt.get_element(dist_to_next, idx)
+        if d_seg is None:
+            d_out = "Unknown"
+        else:
+            
+            d_out = round(d_seg, 4)
+
+        return {
+            "id": entry_id,
+            "lat": entry_lat,
+            "lon": entry_lon,
+            "num_grullas": num_grullas,
+            "tags_sample": tags_sample,
+            "dist_to_next_km": d_out
+        }
+
+    n = total_points
+    max_mostrar = 5
+    if max_mostrar > n:
+        max_mostrar = n
+
+    first_vertices = lt.new_list()
+    last_vertices = lt.new_list()
+
+   
+    i = 0
+    while i < max_mostrar:
+        lt.add_last(first_vertices, build_vertex_entry(i))
+        i += 1
+
+    
+    i = n - max_mostrar
+    while i < n:
+        lt.add_last(last_vertices, build_vertex_entry(i))
+        i += 1
+
+    
+    result = {
+        "success": True,
+        "origin_vertex": origin_id,
+        "dest_vertex": dest_id,
+        "last_inside_vertex_msg": last_inside_msg,
+        "total_distance_km": round(total_distance, 4),
+        "total_points": total_points,
+        "first_vertices": first_vertices,   
+        "last_vertices": last_vertices      
+    }
+
+    return result
 
 
 def req_3(catalog):
