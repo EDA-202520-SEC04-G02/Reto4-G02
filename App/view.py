@@ -166,8 +166,46 @@ def print_req_4(control):
     """
         Función que imprime la solución del Requerimiento 4 en consola
     """
-    # TODO: Imprimir el resultado del requerimiento 4
-    pass
+    print("\n=== REQ. 4: Corredor hídrico óptimo (MST) ===")
+    lat_o = float(input("Latitud del punto de origen: "))
+    lon_o = float(input("Longitud del punto de origen: "))
+
+    result = logic.req_4(control, lat_o, lon_o)
+
+    print("\n" + result["mensaje"])
+
+    # Siempre imprimimos el tiempo, exista o no red viable
+    if "tiempo_ms" in result:
+        print(f"Tiempo de ejecución REQ.4: {result['tiempo_ms']:.3f} ms")
+
+    if not result["ok"]:
+        print(f"Punto migratorio de origen (más cercano): {result['origen']}")
+        return
+
+    print(f"\nPunto migratorio de origen (más cercano): {result['origen']}")
+    print(f"Total de puntos en el corredor: {result['total_puntos']}")
+    print(f"Total de individuos en el corredor: {result['total_individuos']}")
+    print(f"Distancia total del corredor a fuentes hídricas: {result['distancia_total_agua']:.4f} km")
+
+    ruta = result["ruta_completa"]
+    if not ruta:
+        print("\nNo se pudo construir el corredor migratorio.")
+        return
+
+    n = 5
+    total = len(ruta)
+    if total <= n:
+        primeros = ruta
+        ultimos = ruta
+    else:
+        primeros = ruta[0:n]
+        ultimos = ruta[-n:]
+
+    print("\n--- Primeros 5 vértices del corredor ---\n")
+    print(tabulate(primeros, headers="keys", tablefmt="grid"))
+
+    print("\n--- Últimos 5 vértices del corredor ---\n")
+    print(tabulate(ultimos, headers="keys", tablefmt="grid"))
 
 
 def print_req_5(control):

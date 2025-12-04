@@ -12,11 +12,8 @@ from DataStructures.Graph import digraph as G
 from DataStructures.Graph import dfs as DFS
 from DataStructures.Graph import bfs as BFS
 from DataStructures.Graph import dijsktra_structure as DIJ
-<<<<<<< HEAD
 from DataStructures.Graph import edge as EDG
-=======
 from DataStructures.Graph import prim as PRIM
->>>>>>> b81716d020e7f821528e3bfdad15680a8bb5d4ab
 # ----------------------------------------------------
 # Catalogo de datos
 # ----------------------------------------------------
@@ -967,12 +964,174 @@ def req_3(catalog):
     pass
 
 
-def req_4(catalog):
+def req_4(catalog, lat_origen, lon_origen):
     """
-    Retorna el resultado del requerimiento 4
+    REQ. 4: Estimar corredores hídricos óptimos para la migración de aves.
+
+    - Usa Haversine + aproximación geográfica para encontrar el vértice de origen (más cercano).
+    - Corre Prim sobre graph_agua desde ese origen (MST del componente alcanzable).
+    - Calcula:
+        * total de puntos del corredor (número de vértices en el MST),
+        * total de individuos (tags únicos que pasan por esos vértices),
+        * distancia total del MST a las fuentes hídricas (suma de pesos).
+    - Retorna también tabla de vértices del corredor y versión 5+5.
     """
-    # TODO: Modificar el requerimiento 4
-    pass
+
+    start = get_time()
+
+    graph_agua     = catalog["graph_agua"]
+    vertices_info  = catalog["vertices_info"]
+
+    # 1. Encontrar punto migratorio de origen más cercano a la lat/lon
+    origen_id, dist_o = find_closest_vertex(catalog, lat_origen, lon_origen)
+
+    if origen_id is None:
+        end = get_time()
+        delta = delta_time(start, end)
+        return {
+            "ok": False,
+            "mensaje": "No se encontró un punto migratorio cercano al origen especificado.",
+            "origen": None,
+            "total_puntos": 0,
+            "total_individuos": 0,
+            "distancia_total_agua": 0.0,
+            "ruta_5_5": [],
+            "ruta_completa": [],
+            "tiempo_ms": delta
+        }
+
+    # 2. Ejecutar Prim sobre graph_agua desde origen_id
+    prim_struct = PRIM.prim_mst(graph_agua, origen_id)
+
+    # 3. Obtener arcos del MST
+    edges = PRIM.edges_mst(graph_agua, prim_struct)
+    num_edges = lt.size(edges)
+
+    # Si no hay arcos, no hay red hídrica "real"
+    if num_edges == 0:
+        end = get_time()
+        delta = delta_time(start, end)
+        return {
+            "ok": False,
+            "mensaje": ("No se encontró una red hídrica viable "
+                        f"desde el punto migratorio de origen {origen_id}."),
+            "origen": origen_id,
+            "total_puntos": 0,
+            "total_individuos": 0,
+            "distancia_total_agua": 0.0,
+            "ruta_5_5": [],
+            "ruta_completa": [],
+            "tiempo_ms": delta
+        }
+
+    # 4. Construir el conjunto de vértices que pertenecen al MST
+    vertices_mst = mp.new_map(2 * num_edges + 1, 0.5)
+    mp.put(vertices_mst, origen_id, True)
+
+    for i in range(num_edges):
+        edge = lt.get_element(edges, i)
+        u = edge["edge_from"]
+        v = edge["to"]
+
+        if u is not None and not mp.contains(vertices_mst, u):
+            mp.put(vertices_mst, u, True)
+        if not mp.contains(vertices_mst, v):
+            mp.put(vertices_mst, v, True)
+
+    # Construir lista TDA de ids de vértice, poniendo origen primero
+    mst_vertices_list = lt.new_list()
+    lt.add_last(mst_vertices_list, origen_id)
+
+    vertex_keys = mp.key_set(vertices_mst)
+    n_keys = lt.size(vertex_keys)
+    for i in range(n_keys):
+        vid = lt.get_element(vertex_keys, i)
+        if vid != origen_id:
+            lt.add_last(mst_vertices_list, vid)
+
+    total_puntos = lt.size(mst_vertices_list)
+
+    # 5. Contar total de individuos (tags únicos) que pasan por esos puntos
+    tags_set = mp.new_map(1000, 0.5)  # set de tags usando mapa
+
+    for i in range(total_puntos):
+        vid = lt.get_element(mst_vertices_list, i)
+        v = mp.get(vertices_info, vid)
+        if v is None:
+            continue
+
+        tags_list = v.get("tags", None)
+        if tags_list is None:
+            continue
+
+        size_tags = lt.size(tags_list)
+        for j in range(size_tags):
+            tag = lt.get_element(tags_list, j)
+            if not mp.contains(tags_set, tag):
+                mp.put(tags_set, tag, True)
+
+    total_individuos = mp.size(tags_set)
+
+    # 6. Peso total del MST (distancia total del corredor a las fuentes hídricas)
+    distancia_total_agua = PRIM.weight_mst(graph_agua, prim_struct)
+
+    # 7. Construir tabla de vértices del corredor
+    ruta_completa = []
+    for i in range(total_puntos):
+        vid = lt.get_element(mst_vertices_list, i)
+        v = mp.get(vertices_info, vid)
+
+        if v is None:
+            lat = "Unknown"
+            lon = "Unknown"
+            num_grullas = "Unknown"
+            tags_str = "Unknown"
+        else:
+            lat = v.get("lat", "Unknown")
+            lon = v.get("lon", "Unknown")
+            tags_list = v.get("tags", None)
+
+            if tags_list is None:
+                num_grullas = "Unknown"
+                tags_str = "Unknown"
+            else:
+                num_grullas = lt.size(tags_list)
+                tags_str = tags_first_last_3(tags_list)
+
+        fila = {
+            "ID punto": vid,
+            "Posición (lat, lon)": f"({lat}, {lon})",
+            "Num. grullas": num_grullas,
+            "Tags (3 primeros y 3 últimos)": tags_str
+        }
+        ruta_completa.append(fila)
+
+    # 8. Construir lista 5+5 para la vista
+    total = len(ruta_completa)
+    if total <= 10:
+        ruta_5_5 = ruta_completa[:]
+    else:
+        primeros_5 = ruta_completa[0:5]
+        ultimos_5 = ruta_completa[-5:]
+        ruta_5_5 = primeros_5 + ultimos_5
+
+    end = get_time()
+    delta = delta_time(start, end)
+
+    resultado = {
+        "ok": True,
+        "mensaje": (f"Se encontró un corredor hídrico óptimo (MST) "
+                    f"desde el punto migratorio de origen {origen_id}."),
+        "origen": origen_id,
+        "total_puntos": total_puntos,
+        "total_individuos": total_individuos,
+        "distancia_total_agua": round(distancia_total_agua, 4),
+        "ruta_5_5": ruta_5_5,
+        "ruta_completa": ruta_completa,
+        "tiempo_ms": delta
+    }
+
+    return resultado
 
 
 def dijkstra_path_as_array(structure, dest):
