@@ -12,7 +12,11 @@ from DataStructures.Graph import digraph as G
 from DataStructures.Graph import dfs as DFS
 from DataStructures.Graph import bfs as BFS
 from DataStructures.Graph import dijsktra_structure as DIJ
+<<<<<<< HEAD
 from DataStructures.Graph import edge as EDG
+=======
+from DataStructures.Graph import prim as PRIM
+>>>>>>> b81716d020e7f821528e3bfdad15680a8bb5d4ab
 # ----------------------------------------------------
 # Catalogo de datos
 # ----------------------------------------------------
