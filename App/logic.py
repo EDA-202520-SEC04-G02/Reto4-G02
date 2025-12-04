@@ -12,6 +12,7 @@ from DataStructures.Graph import digraph as G
 from DataStructures.Graph import dfs as DFS
 from DataStructures.Graph import bfs as BFS
 from DataStructures.Graph import dijsktra_structure as DIJ
+from DataStructures.Graph import edge as EDG
 # ----------------------------------------------------
 # Catalogo de datos
 # ----------------------------------------------------
@@ -970,12 +971,176 @@ def req_4(catalog):
     pass
 
 
-def req_5(catalog):
+def dijkstra_path_as_array(structure, dest):
+    """
+    Toma la estructura de Dijkstra y un vértice destino,
+    y retorna el camino mínimo como array_list (lt) en orden
+    [source, ..., dest]. Si no hay camino, retorna None.
+    """
+    path_sl = DIJ.path_to(dest, structure)  
+
+    if path_sl is None:
+        return None
+
+    n = sl.size(path_sl)
+
+    
+    path_al = lt.new_list()
+
+    i = n - 1
+    while i >= 0:
+        v = sl.get_element(path_sl, i)
+        lt.add_last(path_al, v)
+        i -= 1
+
+    return path_al
+
+def req_5(catalog, lat_origen, lon_origen, lat_destino, lon_destino, tipo_grafo):
     """
     Retorna el resultado del requerimiento 5
     """
     # TODO: Modificar el requerimiento 5
-    pass
+    vertices_info = catalog["vertices_info"]
+
+    
+    if tipo_grafo == "agua":
+        graph = catalog["graph_agua"]
+        metric_label = "Distancia a fuentes hídricas (km)"
+    else:
+        
+        graph = catalog["graph_dist"]
+        metric_label = "Distancia de desplazamiento (km)"
+
+   
+    origin_id, _ = find_closest_vertex(catalog, lat_origen, lon_origen)
+    dest_id, _   = find_closest_vertex(catalog, lat_destino, lon_destino)
+
+    if origin_id is None or dest_id is None:
+        return {
+            "success": False,
+            "message": "No se encontraron puntos migratorios cercanos para el origen o el destino.",
+            "origin_vertex": origin_id if origin_id is not None else "Unknown",
+            "dest_vertex": dest_id if dest_id is not None else "Unknown"
+        }
+
+    
+    dij_structure = DIJ.dijkstra(graph, origin_id)
+
+    
+    if not DIJ.has_path_to(dest_id, dij_structure):
+        return {
+            "success": False,
+            "message": "No existe un camino viable entre los puntos migratorios de origen y destino.",
+            "origin_vertex": origin_id,
+            "dest_vertex": dest_id
+        }
+
+    
+    path = dijkstra_path_as_array(dij_structure, dest_id)
+    total_points = lt.size(path)
+    total_segments = 0
+    if total_points > 0:
+        total_segments = total_points - 1
+
+    
+    total_cost = DIJ.dist_to(dest_id, dij_structure)
+
+    
+    dist_to_next = lt.new_list()
+    i = 0
+    while i < total_points - 1:
+        u = lt.get_element(path, i)
+        v = lt.get_element(path, i + 1)
+
+        edges_map = G.edges_vertex(graph, u)
+        wgt = None
+        if edges_map is not None:
+            edge_uv = mp.get(edges_map, v)
+            if edge_uv is not None:
+                wgt = EDG.weight(edge_uv)
+
+        lt.add_last(dist_to_next, wgt)
+        i += 1
+
+
+    lt.add_last(dist_to_next, None)
+
+
+    def build_vertex_entry(idx):
+        vid = lt.get_element(path, idx)
+        vinfo = mp.get(vertices_info, vid)
+
+        if vinfo is None:
+            #
+            return {
+                "id": vid if vid is not None else "Unknown",
+                "lat": "Unknown",
+                "lon": "Unknown",
+                "num_grullas": "Unknown",
+                "tags_sample": "Unknown",
+                "dist_to_next_km": "Unknown"
+            }
+
+        
+        entry_id  = vinfo["id"]  if "id"  in vinfo else vid
+        entry_lat = vinfo["lat"] if "lat" in vinfo else "Unknown"
+        entry_lon = vinfo["lon"] if "lon" in vinfo else "Unknown"
+
+        
+        tags_list   = vinfo["tags"]
+        num_grullas = lt.size(tags_list)
+        tags_sample = tags_first_last_3(tags_list)
+
+        
+        d_seg = lt.get_element(dist_to_next, idx)
+        if d_seg is None:
+            d_out = "Unknown"
+        else:
+            d_out = round(d_seg, 4)
+
+        return {
+            "id": entry_id,
+            "lat": entry_lat,
+            "lon": entry_lon,
+            "num_grullas": num_grullas,
+            "tags_sample": tags_sample,
+            "dist_to_next_km": d_out
+        }
+
+    max_mostrar = 5
+    if max_mostrar > total_points:
+        max_mostrar = total_points
+
+    first_vertices = lt.new_list()
+    last_vertices  = lt.new_list()
+
+    
+    i = 0
+    while i < max_mostrar:
+        lt.add_last(first_vertices, build_vertex_entry(i))
+        i += 1
+
+    
+    i = total_points - max_mostrar
+    while i < total_points:
+        lt.add_last(last_vertices, build_vertex_entry(i))
+        i += 1
+
+    
+    result = {
+        "success": True,
+        "origin_vertex": origin_id,
+        "dest_vertex": dest_id,
+        "metric_label": metric_label,
+        "total_cost": round(total_cost, 4),
+        "total_points": total_points,
+        "total_segments": total_segments,
+        "first_vertices": first_vertices,   
+        "last_vertices": last_vertices      
+    }
+
+    return result
+
 
 def req_6(catalog):
     """
