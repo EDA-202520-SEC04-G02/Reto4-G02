@@ -1146,13 +1146,248 @@ def req_5(catalog, lat_origen, lon_origen, lat_destino, lon_destino, tipo_grafo)
     return result
 
 
+def _compute_water_subnets(catalog):
+    """
+    Identifica las subredes hídricas (componentes) en graph_agua usando BFS.
+
+    Retorna:
+      - components: lista TDA (lt) donde cada elemento es un dict:
+            { "id": int, "vertices": lt (ids de vértice) }
+      - total_components: número de subredes encontradas
+    """
+    graph_agua = catalog["graph_agua"]
+
+    vertices = G.vertices(graph_agua)   # lista lt de ids de vértices
+    n_vertices = lt.size(vertices)
+
+    # v -> id de subred
+    comp_id_by_vertex = mp.new_map(23000, 0.5)
+
+    components = lt.new_list()
+    comp_index = 0  # contador de subredes
+
+    i = 0
+    while i < n_vertices:
+        v = lt.get_element(vertices, i)
+
+        # si el vértice aún no pertenece a ninguna subred, arrancamos BFS desde él
+        if not mp.contains(comp_id_by_vertex, v):
+
+            comp_index += 1
+
+            # BFS desde v (tu implementación del curso)
+            visited = BFS.bfs(graph_agua, v)
+
+            # Obtener todos los vértices alcanzados desde v
+            keyset = mp.key_set(visited)  
+            n_reached = lt.size(keyset)
+
+            comp_vertices = lt.new_list()
+
+            j = 0
+            while j < n_reached:
+                w = lt.get_element(keyset, j)
+
+                # Solo asignamos si aún no tenían subred
+                if not mp.contains(comp_id_by_vertex, w):
+                    mp.put(comp_id_by_vertex, w, comp_index)
+                    lt.add_last(comp_vertices, w)
+
+                j += 1
+
+            # Crear estructura de subred
+            comp = {
+                "id": comp_index,
+                "vertices": comp_vertices
+            }
+            lt.add_last(components, comp)
+
+        i += 1
+
+    return components, comp_index
+
+def _cmp_components(c1, c2):
+    """
+    Retorna True si c1 va antes que c2 en el orden:
+      - mayor número de vértices primero
+      - en empate, menor id primero
+    """
+    size1 = lt.size(c1["vertices"])
+    size2 = lt.size(c2["vertices"])
+
+    if size1 > size2:
+        return True
+    elif size1 < size2:
+        return False
+    else:
+        return c1["id"] < c2["id"]
+    
+    
+    
 def req_6(catalog):
     """
     Retorna el resultado del requerimiento 6
     """
     # TODO: Modificar el requerimiento 6
-    pass
+    
+    vertices_info = catalog["vertices_info"]
+    graph_agua    = catalog["graph_agua"]
 
+    # 1. Calcular todas las subredes hídricas
+    components, total_components = _compute_water_subnets(catalog)
+
+    if total_components == 0:
+        return {
+            "success": False,
+            "message": "No se reconoció ninguna subred hídrica viable en el nicho biológico.",
+            "total_subredes": 0
+        }
+
+    # 2. Ordenar subredes por tamaño (y por id en caso de empate)
+    components_sorted = lt.merge_sort(components, _cmp_components)
+    n_comps = lt.size(components_sorted)
+
+    # Mostrar máximo 5 subredes, o todas si hay menos de 5
+    max_subredes = 5
+    if max_subredes > n_comps:
+        max_subredes = n_comps
+
+    subredes_top = lt.new_list()
+
+    
+    idx_comp = 0
+    while idx_comp < max_subredes:
+        comp = lt.get_element(components_sorted, idx_comp)
+        comp_id = comp["id"]
+        comp_vertices = comp["vertices"]
+        num_vertices = lt.size(comp_vertices)
+
+        
+        min_lat = None
+        max_lat = None
+        min_lon = None
+        max_lon = None
+
+       
+        tags_seen = mp.new_map(23000, 0.5)
+        tags_list = lt.new_list()   
+        total_individuos = 0
+
+        
+        i = 0
+        while i < num_vertices:
+            vid = lt.get_element(comp_vertices, i)
+            vinfo = mp.get(vertices_info, vid)
+
+            if vinfo is not None:
+                lat = vinfo["lat"]
+                lon = vinfo["lon"]
+
+                
+                if min_lat is None or lat < min_lat:
+                    min_lat = lat
+                if max_lat is None or lat > max_lat:
+                    max_lat = lat
+                if min_lon is None or lon < min_lon:
+                    min_lon = lon
+                if max_lon is None or lon > max_lon:
+                    max_lon = lon
+
+                
+                tags_list_v = vinfo["tags"]
+                n_tags_v = lt.size(tags_list_v)
+                j = 0
+                while j < n_tags_v:
+                    tag = lt.get_element(tags_list_v, j)
+                    if not mp.contains(tags_seen, tag):
+                        mp.put(tags_seen, tag, True)
+                        lt.add_last(tags_list, tag)
+                        total_individuos += 1
+                    j += 1
+
+            i += 1
+
+        
+
+        first_points = lt.new_list()
+        last_points  = lt.new_list()
+
+        limit_pts = 3
+        if limit_pts > num_vertices:
+            limit_pts = num_vertices
+
+        
+        i = 0
+        while i < limit_pts:
+            vid = lt.get_element(comp_vertices, i)
+            vinfo = mp.get(vertices_info, vid)
+
+            if vinfo is not None:
+                entry = {
+                    "id": vid,
+                    "lat": vinfo["lat"],
+                    "lon": vinfo["lon"]
+                }
+            else:
+                entry = {
+                    "id": vid,
+                    "lat": "Unknown",
+                    "lon": "Unknown"
+                }
+
+            lt.add_last(first_points, entry)
+            i += 1
+
+        
+        i = num_vertices - limit_pts
+        while i < num_vertices:
+            vid = lt.get_element(comp_vertices, i)
+            vinfo = mp.get(vertices_info, vid)
+
+            if vinfo is not None:
+                entry = {
+                    "id": vid,
+                    "lat": vinfo["lat"],
+                    "lon": vinfo["lon"]
+                }
+            else:
+                entry = {
+                    "id": vid,
+                    "lat": "Unknown",
+                    "lon": "Unknown"
+                }
+
+            lt.add_last(last_points, entry)
+            i += 1
+
+        
+        tags_sample = tags_first_last_3(tags_list)
+
+        
+        subred_info = {
+            "id_subred": comp_id,
+            "num_vertices": num_vertices,
+            "min_lat": min_lat if min_lat is not None else "Unknown",
+            "max_lat": max_lat if max_lat is not None else "Unknown",
+            "min_lon": min_lon if min_lon is not None else "Unknown",
+            "max_lon": max_lon if max_lon is not None else "Unknown",
+            "first_points": first_points,  
+            "last_points": last_points,     
+            "total_individuals": total_individuos,
+            "tags_sample": tags_sample      # string con 3 primeros / 3 últimos tags
+        }
+
+        lt.add_last(subredes_top, subred_info)
+        idx_comp += 1
+
+    # 4. Resultado final
+    result = {
+        "success": True,
+        "total_subredes": total_components,
+        "subredes_top": subredes_top    
+    }
+
+    return result
 
 # Funciones para medir tiempos de ejecucion
 
