@@ -801,41 +801,42 @@ def bfs_path_from_visited(visited_map, source, dest):
 
 def req_2(catalog, lat_origen, lon_origen, lat_destino, lon_destino, radio_km):
     """
-    Retorna el resultado del requerimiento 2
+    REQ. 2: Detectar los movimientos entre dos puntos migratorios de un nicho biológico
+    alrededor de un área de interés, usando BFS.
     """
-    # TODO: Modificar el requerimiento 2
+    start = get_time()
 
     start = get_time()
 
     vertices_info = catalog["vertices_info"]
     graph_dist = catalog["graph_dist"]
 
-    # 1. Encontrar vértices de origen y destino más cercanos
+    # 1. Aproximación geográfica (Haversine)
     origin_id, _ = find_closest_vertex(catalog, lat_origen, lon_origen)
-    dest_id, _ = find_closest_vertex(catalog, lat_destino, lon_destino)
+    dest_id, _   = find_closest_vertex(catalog, lat_destino, lon_destino)
 
     if origin_id is None or dest_id is None:
         end = get_time()
         delta = delta_time(start, end)
         return {
             "success": False,
-            "message": "No se encontraron puntos migratorios cercanos para el origen o el destino.",
+            "error": "No se encontraron puntos migratorios cercanos para el origen o el destino.",
             "origin_vertex": origin_id if origin_id is not None else "Unknown",
-            "dest_vertex": dest_id if dest_id is not None else "Unknown",
+            "dest_vertex": dest_id   if dest_id is not None   else "Unknown",
             "tiempo_ms": delta
         }
 
     # 2. BFS desde el origen
     visited_map = BFS.bfs(graph_dist, origin_id)
 
-    # 3. Reconstruir camino origen -> destino
+    # 3. Reconstruir camino [origen, ..., destino]
     path = bfs_path_from_visited(visited_map, origin_id, dest_id)
     if path is None:
         end = get_time()
         delta = delta_time(start, end)
         return {
             "success": False,
-            "message": "No existe un camino viable entre los puntos migratorios de origen y destino.",
+            "error": "No existe un camino viable entre los puntos migratorios de origen y destino.",
             "origin_vertex": origin_id,
             "dest_vertex": dest_id,
             "tiempo_ms": delta
@@ -843,7 +844,7 @@ def req_2(catalog, lat_origen, lon_origen, lat_destino, lon_destino, radio_km):
 
     total_points = lt.size(path)
 
-    # 4. Distancia total y distancia al siguiente vértice
+    # 4. Distancia de desplazamiento total y distancias segmento a segmento
     dist_to_next = lt.new_list()
     total_distance = 0.0
 
@@ -858,7 +859,7 @@ def req_2(catalog, lat_origen, lon_origen, lat_destino, lon_destino, radio_km):
         if edges_map is not None:
             edge_uv = mp.get(edges_map, v)
             if edge_uv is not None:
-                w = EDG.weight(edge_uv)
+                w = EDG.weight(edge_uv)   # tu función weight(edge)
                 if w is not None:
                     peso_uv = w
                     total_distance += w
@@ -866,10 +867,10 @@ def req_2(catalog, lat_origen, lon_origen, lat_destino, lon_destino, radio_km):
         lt.add_last(dist_to_next, peso_uv)
         i += 1
 
-    # último no tiene siguiente
+    # El último nodo no tiene "siguiente"
     lt.add_last(dist_to_next, None)
 
-    # 5. Último nodo dentro del área de interés
+    # 5. Último nodo dentro del área de interés (radio_km alrededor del origen)
     v_origin = mp.get(vertices_info, origin_id)
     lat0 = v_origin["lat"]
     lon0 = v_origin["lon"]
@@ -880,36 +881,41 @@ def req_2(catalog, lat_origen, lon_origen, lat_destino, lon_destino, radio_km):
     while i < total_points:
         vid = lt.get_element(path, i)
         vinfo = mp.get(vertices_info, vid)
+        if vinfo is None:
+            i += 1
+            continue
+
         d_km = haversine(lat0, lon0, vinfo["lat"], vinfo["lon"])
         if d_km <= radio_km:
             last_inside_vertex = vid
         i += 1
 
-    if last_inside_vertex is None:
-        last_inside_msg = (
-            "Ningún nodo de la ruta se encuentra dentro del área de interés "
-            + "de radio " + str(radio_km) + " km alrededor del origen."
-        )
-    else:
-        last_inside_msg = (
-            "El último nodo dentro del área de interés (radio "
-            + str(radio_km) + " km) es el vértice con id: "
-            + str(last_inside_vertex) + "."
-        )
-
-    
-
+    # 6. Construir info de vértices (5 primeros y 5 últimos)
     def build_vertex_entry(idx):
         vid = lt.get_element(path, idx)
         vinfo = mp.get(vertices_info, vid)
 
-        entry_id = vinfo["id"] if "id" in vinfo else vid
+        if vinfo is None:
+            return {
+                "id": vid if vid is not None else "Unknown",
+                "lat": "Unknown",
+                "lon": "Unknown",
+                "num_grullas": "Unknown",
+                "tags_sample": "Unknown",
+                "dist_to_next_km": "Unknown"
+            }
+
+        entry_id  = vinfo["id"]  if "id"  in vinfo else vid
         entry_lat = vinfo["lat"] if "lat" in vinfo else "Unknown"
         entry_lon = vinfo["lon"] if "lon" in vinfo else "Unknown"
 
-        tags_list = vinfo["tags"]
-        num_grullas = lt.size(tags_list)
-        tags_sample = tags_first_last_3(tags_list)
+        tags_list = vinfo.get("tags", None)
+        if tags_list is None:
+            num_grullas = "Unknown"
+            tags_sample = "Unknown"
+        else:
+            num_grullas = lt.size(tags_list)
+            tags_sample = tags_first_last_3(tags_list)
 
         d_seg = lt.get_element(dist_to_next, idx)
         if d_seg is None:
@@ -926,23 +932,21 @@ def req_2(catalog, lat_origen, lon_origen, lat_destino, lon_destino, radio_km):
             "dist_to_next_km": d_out
         }
 
-    n = total_points
+    # Construir listas TDA de primeros y últimos 5
     max_mostrar = 5
-    if max_mostrar > n:
-        max_mostrar = n
+    if max_mostrar > total_points:
+        max_mostrar = total_points
 
     first_vertices = lt.new_list()
-    last_vertices = lt.new_list()
+    last_vertices  = lt.new_list()
 
-    # primeros
     i = 0
     while i < max_mostrar:
         lt.add_last(first_vertices, build_vertex_entry(i))
         i += 1
 
-    # últimos
-    i = n - max_mostrar
-    while i < n:
+    i = total_points - max_mostrar
+    while i < total_points:
         lt.add_last(last_vertices, build_vertex_entry(i))
         i += 1
 
@@ -953,7 +957,8 @@ def req_2(catalog, lat_origen, lon_origen, lat_destino, lon_destino, radio_km):
         "success": True,
         "origin_vertex": origin_id,
         "dest_vertex": dest_id,
-        "last_inside_vertex_msg": last_inside_msg,
+        "last_inside_vertex": last_inside_vertex,  # dato crudo
+        "radio_km": radio_km,                      # para construir el mensaje en la vista
         "total_distance_km": round(total_distance, 4),
         "total_points": total_points,
         "first_vertices": first_vertices,
@@ -962,7 +967,6 @@ def req_2(catalog, lat_origen, lon_origen, lat_destino, lon_destino, radio_km):
     }
 
     return result
-
 
 def req_3(catalog):
     """
