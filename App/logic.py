@@ -805,38 +805,46 @@ def req_2(catalog, lat_origen, lon_origen, lat_destino, lon_destino, radio_km):
     """
     # TODO: Modificar el requerimiento 2
 
+    start = get_time()
+
     vertices_info = catalog["vertices_info"]
     graph_dist = catalog["graph_dist"]
 
-   
+    # 1. Encontrar vértices de origen y destino más cercanos
     origin_id, _ = find_closest_vertex(catalog, lat_origen, lon_origen)
     dest_id, _ = find_closest_vertex(catalog, lat_destino, lon_destino)
 
     if origin_id is None or dest_id is None:
+        end = get_time()
+        delta = delta_time(start, end)
         return {
             "success": False,
             "message": "No se encontraron puntos migratorios cercanos para el origen o el destino.",
             "origin_vertex": origin_id if origin_id is not None else "Unknown",
-            "dest_vertex": dest_id if dest_id is not None else "Unknown"
+            "dest_vertex": dest_id if dest_id is not None else "Unknown",
+            "tiempo_ms": delta
         }
 
-    
+    # 2. BFS desde el origen
     visited_map = BFS.bfs(graph_dist, origin_id)
 
-    
+    # 3. Reconstruir camino origen -> destino
     path = bfs_path_from_visited(visited_map, origin_id, dest_id)
     if path is None:
+        end = get_time()
+        delta = delta_time(start, end)
         return {
             "success": False,
             "message": "No existe un camino viable entre los puntos migratorios de origen y destino.",
             "origin_vertex": origin_id,
-            "dest_vertex": dest_id
+            "dest_vertex": dest_id,
+            "tiempo_ms": delta
         }
 
     total_points = lt.size(path)
 
-    
-    dist_to_next = lt.new_list()   
+    # 4. Distancia total y distancia al siguiente vértice
+    dist_to_next = lt.new_list()
     total_distance = 0.0
 
     i = 0
@@ -858,10 +866,10 @@ def req_2(catalog, lat_origen, lon_origen, lat_destino, lon_destino, radio_km):
         lt.add_last(dist_to_next, peso_uv)
         i += 1
 
-    
+    # último no tiene siguiente
     lt.add_last(dist_to_next, None)
 
-    
+    # 5. Último nodo dentro del área de interés
     v_origin = mp.get(vertices_info, origin_id)
     lat0 = v_origin["lat"]
     lon0 = v_origin["lon"]
@@ -895,21 +903,18 @@ def req_2(catalog, lat_origen, lon_origen, lat_destino, lon_destino, radio_km):
         vid = lt.get_element(path, idx)
         vinfo = mp.get(vertices_info, vid)
 
-        
         entry_id = vinfo["id"] if "id" in vinfo else vid
         entry_lat = vinfo["lat"] if "lat" in vinfo else "Unknown"
         entry_lon = vinfo["lon"] if "lon" in vinfo else "Unknown"
 
         tags_list = vinfo["tags"]
         num_grullas = lt.size(tags_list)
-        tags_sample = tags_first_last_3(tags_list)  
+        tags_sample = tags_first_last_3(tags_list)
 
-       
         d_seg = lt.get_element(dist_to_next, idx)
         if d_seg is None:
             d_out = "Unknown"
         else:
-            
             d_out = round(d_seg, 4)
 
         return {
@@ -929,19 +934,21 @@ def req_2(catalog, lat_origen, lon_origen, lat_destino, lon_destino, radio_km):
     first_vertices = lt.new_list()
     last_vertices = lt.new_list()
 
-   
+    # primeros
     i = 0
     while i < max_mostrar:
         lt.add_last(first_vertices, build_vertex_entry(i))
         i += 1
 
-    
+    # últimos
     i = n - max_mostrar
     while i < n:
         lt.add_last(last_vertices, build_vertex_entry(i))
         i += 1
 
-    
+    end = get_time()
+    delta = delta_time(start, end)
+
     result = {
         "success": True,
         "origin_vertex": origin_id,
@@ -949,8 +956,9 @@ def req_2(catalog, lat_origen, lon_origen, lat_destino, lon_destino, radio_km):
         "last_inside_vertex_msg": last_inside_msg,
         "total_distance_km": round(total_distance, 4),
         "total_points": total_points,
-        "first_vertices": first_vertices,   
-        "last_vertices": last_vertices      
+        "first_vertices": first_vertices,
+        "last_vertices": last_vertices,
+        "tiempo_ms": delta
     }
 
     return result
@@ -1163,47 +1171,65 @@ def req_5(catalog, lat_origen, lon_origen, lat_destino, lon_destino, tipo_grafo)
     Retorna el resultado del requerimiento 5
     """
     # TODO: Modificar el requerimiento 5
+    start = get_time()
+
     vertices_info = catalog["vertices_info"]
 
     
     if tipo_grafo == "agua":
         graph = catalog["graph_agua"]
-        metric_label = "Distancia a fuentes hídricas (km)"
+        metrica = "Distancia a fuentes hídricas (km)"
     else:
-        
         graph = catalog["graph_dist"]
-        metric_label = "Distancia de desplazamiento (km)"
+        metrica = "Distancia de desplazamiento (km)"
 
-   
+    
     origin_id, _ = find_closest_vertex(catalog, lat_origen, lon_origen)
     dest_id, _   = find_closest_vertex(catalog, lat_destino, lon_destino)
 
     if origin_id is None or dest_id is None:
+        end = get_time()
+        delta = delta_time(start, end)
         return {
-            "success": False,
-            "message": "No se encontraron puntos migratorios cercanos para el origen o el destino.",
-            "origin_vertex": origin_id if origin_id is not None else "Unknown",
-            "dest_vertex": dest_id if dest_id is not None else "Unknown"
+            "ok": False,
+            "mensaje": "No se encontraron puntos migratorios cercanos para el origen o el destino.",
+            "origen": origin_id if origin_id is not None else "Unknown",
+            "destino": dest_id if dest_id is not None else "Unknown",
+            "metrica": metrica,
+            "costo_total": 0.0,
+            "total_puntos": 0,
+            "total_segmentos": 0,
+            "ruta_completa": lt.new_list(),   
+            "tiempo_ms": delta
         }
 
     
     dij_structure = DIJ.dijkstra(graph, origin_id)
 
-    
+   
     if not DIJ.has_path_to(dest_id, dij_structure):
+        end = get_time()
+        delta = delta_time(start, end)
         return {
-            "success": False,
-            "message": "No existe un camino viable entre los puntos migratorios de origen y destino.",
-            "origin_vertex": origin_id,
-            "dest_vertex": dest_id
+            "ok": False,
+            "mensaje": "No existe un camino viable entre los puntos migratorios de origen y destino.",
+            "origen": origin_id,
+            "destino": dest_id,
+            "metrica": metrica,
+            "costo_total": 0.0,
+            "total_puntos": 0,
+            "total_segmentos": 0,
+            "ruta_completa": lt.new_list(),   
+            "tiempo_ms": delta
         }
 
     
     path = dijkstra_path_as_array(dij_structure, dest_id)
     total_points = lt.size(path)
-    total_segments = 0
     if total_points > 0:
         total_segments = total_points - 1
+    else:
+        total_segments = 0
 
     
     total_cost = DIJ.dist_to(dest_id, dij_structure)
@@ -1225,163 +1251,73 @@ def req_5(catalog, lat_origen, lon_origen, lat_destino, lon_destino, tipo_grafo)
         lt.add_last(dist_to_next, wgt)
         i += 1
 
-
+    
     lt.add_last(dist_to_next, None)
 
+    
+    ruta_completa = lt.new_list()
 
-    def build_vertex_entry(idx):
-        vid = lt.get_element(path, idx)
+    i = 0
+    while i < total_points:
+        vid = lt.get_element(path, i)
         vinfo = mp.get(vertices_info, vid)
 
         if vinfo is None:
-            #
-            return {
-                "id": vid if vid is not None else "Unknown",
-                "lat": "Unknown",
-                "lon": "Unknown",
-                "num_grullas": "Unknown",
-                "tags_sample": "Unknown",
-                "dist_to_next_km": "Unknown"
-            }
-
-        
-        entry_id  = vinfo["id"]  if "id"  in vinfo else vid
-        entry_lat = vinfo["lat"] if "lat" in vinfo else "Unknown"
-        entry_lon = vinfo["lon"] if "lon" in vinfo else "Unknown"
-
-        
-        tags_list   = vinfo["tags"]
-        num_grullas = lt.size(tags_list)
-        tags_sample = tags_first_last_3(tags_list)
-
-        
-        d_seg = lt.get_element(dist_to_next, idx)
-        if d_seg is None:
-            d_out = "Unknown"
+            lat = "Unknown"
+            lon = "Unknown"
+            num_grullas = "Unknown"
+            tags_str = "Unknown"
         else:
-            d_out = round(d_seg, 4)
+            lat = vinfo.get("lat", "Unknown")
+            lon = vinfo.get("lon", "Unknown")
+            tags_list = vinfo.get("tags", None)
 
-        return {
-            "id": entry_id,
-            "lat": entry_lat,
-            "lon": entry_lon,
-            "num_grullas": num_grullas,
-            "tags_sample": tags_sample,
-            "dist_to_next_km": d_out
+            if tags_list is None:
+                num_grullas = "Unknown"
+                tags_str = "Unknown"
+            else:
+                num_grullas = lt.size(tags_list)
+                tags_str = tags_first_last_3(tags_list)
+
+        d_seg = lt.get_element(dist_to_next, i)
+        if d_seg is None:
+            dist_sig = "Unknown"
+        else:
+            dist_sig = round(d_seg, 4)
+
+        fila = {
+            "ID punto": vid,
+            "Posición (lat, lon)": f"({lat}, {lon})",
+            "Num. grullas": num_grullas,
+            "Tags (3 primeros y 3 últimos)": tags_str,
+            "Distancia al siguiente (km)": dist_sig
         }
+        lt.add_last(ruta_completa, fila)
 
-    max_mostrar = 5
-    if max_mostrar > total_points:
-        max_mostrar = total_points
-
-    first_vertices = lt.new_list()
-    last_vertices  = lt.new_list()
-
-    
-    i = 0
-    while i < max_mostrar:
-        lt.add_last(first_vertices, build_vertex_entry(i))
         i += 1
 
-    
-    i = total_points - max_mostrar
-    while i < total_points:
-        lt.add_last(last_vertices, build_vertex_entry(i))
-        i += 1
+    end = get_time()
+    delta = delta_time(start, end)
 
-    
-    result = {
-        "success": True,
-        "origin_vertex": origin_id,
-        "dest_vertex": dest_id,
-        "metric_label": metric_label,
-        "total_cost": round(total_cost, 4),
-        "total_points": total_points,
-        "total_segments": total_segments,
-        "first_vertices": first_vertices,   
-        "last_vertices": last_vertices      
+    resultado = {
+        "ok": True,
+        "mensaje": ("Se encontró la ruta migratoria más eficiente entre los "
+                    f"puntos migratorios {origin_id} y {dest_id}."),
+        "origen": origin_id,
+        "destino": dest_id,
+        "metrica": metrica,
+        "costo_total": round(total_cost, 4),
+        "total_puntos": total_points,
+        "total_segmentos": total_segments,
+        "ruta_completa": ruta_completa,   
+        "tiempo_ms": delta
     }
 
-    return result
+    return resultado
 
 
-def _compute_water_subnets(catalog):
-    """
-    Identifica las subredes hídricas (componentes) en graph_agua usando BFS.
 
-    Retorna:
-      - components: lista TDA (lt) donde cada elemento es un dict:
-            { "id": int, "vertices": lt (ids de vértice) }
-      - total_components: número de subredes encontradas
-    """
-    graph_agua = catalog["graph_agua"]
 
-    vertices = G.vertices(graph_agua)   # lista lt de ids de vértices
-    n_vertices = lt.size(vertices)
-
-    # v -> id de subred
-    comp_id_by_vertex = mp.new_map(23000, 0.5)
-
-    components = lt.new_list()
-    comp_index = 0  # contador de subredes
-
-    i = 0
-    while i < n_vertices:
-        v = lt.get_element(vertices, i)
-
-        # si el vértice aún no pertenece a ninguna subred, arrancamos BFS desde él
-        if not mp.contains(comp_id_by_vertex, v):
-
-            comp_index += 1
-
-            # BFS desde v (tu implementación del curso)
-            visited = BFS.bfs(graph_agua, v)
-
-            # Obtener todos los vértices alcanzados desde v
-            keyset = mp.key_set(visited)  
-            n_reached = lt.size(keyset)
-
-            comp_vertices = lt.new_list()
-
-            j = 0
-            while j < n_reached:
-                w = lt.get_element(keyset, j)
-
-                # Solo asignamos si aún no tenían subred
-                if not mp.contains(comp_id_by_vertex, w):
-                    mp.put(comp_id_by_vertex, w, comp_index)
-                    lt.add_last(comp_vertices, w)
-
-                j += 1
-
-            # Crear estructura de subred
-            comp = {
-                "id": comp_index,
-                "vertices": comp_vertices
-            }
-            lt.add_last(components, comp)
-
-        i += 1
-
-    return components, comp_index
-
-def _cmp_components(c1, c2):
-    """
-    Retorna True si c1 va antes que c2 en el orden:
-      - mayor número de vértices primero
-      - en empate, menor id primero
-    """
-    size1 = lt.size(c1["vertices"])
-    size2 = lt.size(c2["vertices"])
-
-    if size1 > size2:
-        return True
-    elif size1 < size2:
-        return False
-    else:
-        return c1["id"] < c2["id"]
-    
-    
     
 def req_6(catalog):
     """
@@ -1389,35 +1325,114 @@ def req_6(catalog):
     """
     # TODO: Modificar el requerimiento 6
     
-    vertices_info = catalog["vertices_info"]
+    start = get_time()
+
     graph_agua    = catalog["graph_agua"]
+    vertices_info = catalog["vertices_info"]
 
-    # 1. Calcular todas las subredes hídricas
-    components, total_components = _compute_water_subnets(catalog)
+   
+    vertices = G.vertices(graph_agua)
+    n_vertices = lt.size(vertices)
 
-    if total_components == 0:
+    if n_vertices == 0:
+        end = get_time()
+        delta = delta_time(start, end)
         return {
-            "success": False,
-            "message": "No se reconoció ninguna subred hídrica viable en el nicho biológico.",
-            "total_subredes": 0
+            "ok": False,
+            "mensaje": "No se encontraron puntos migratorios en el grafo hídrico.",
+            "total_subredes": 0,
+            "subredes_top": lt.new_list(),   
+            "tiempo_ms": delta
         }
 
-    # 2. Ordenar subredes por tamaño (y por id en caso de empate)
-    components_sorted = lt.merge_sort(components, _cmp_components)
+    
+    comp_id_by_vertex = mp.new_map(23000, 0.5)
+
+    
+    components = lt.new_list()
+    comp_index = 0
+
+    i = 0
+    while i < n_vertices:
+        v = lt.get_element(vertices, i)
+
+        
+        if not mp.contains(comp_id_by_vertex, v):
+
+            comp_index += 1
+
+            
+            visited = BFS.bfs(graph_agua, v)
+
+            keyset = mp.key_set(visited)       
+            n_reached = lt.size(keyset)
+
+            
+            comp_vertices = lt.new_list()
+
+            j = 0
+            while j < n_reached:
+                w = lt.get_element(keyset, j)
+
+                
+                if not mp.contains(comp_id_by_vertex, w):
+                    mp.put(comp_id_by_vertex, w, comp_index)
+                    lt.add_last(comp_vertices, w)
+
+                j += 1
+
+           
+            comp_dict = {
+                "id_subred": comp_index,
+                "vertices": comp_vertices
+            }
+            lt.add_last(components, comp_dict)
+
+        i += 1
+
+    total_components = comp_index
+
+    if total_components == 0:
+        end = get_time()
+        delta = delta_time(start, end)
+        return {
+            "ok": False,
+            "mensaje": "No se reconoció ninguna subred hídrica viable en el nicho biológico.",
+            "total_subredes": 0,
+            "subredes_top": lt.new_list(),
+            "tiempo_ms": delta
+        }
+
+    
+    def cmp_components(c1, c2):
+        verts1 = c1["vertices"]
+        verts2 = c2["vertices"]
+        size1 = lt.size(verts1)
+        size2 = lt.size(verts2)
+
+        if size1 > size2:
+            return True
+        elif size1 < size2:
+            return False
+        else:
+            return c1["id_subred"] < c2["id_subred"]
+
+    components_sorted = lt.merge_sort(components, cmp_components)
     n_comps = lt.size(components_sorted)
 
-    # Mostrar máximo 5 subredes, o todas si hay menos de 5
+    
     max_subredes = 5
     if max_subredes > n_comps:
         max_subredes = n_comps
 
+    
     subredes_top = lt.new_list()
 
     
-    idx_comp = 0
-    while idx_comp < max_subredes:
-        comp = lt.get_element(components_sorted, idx_comp)
-        comp_id = comp["id"]
+    idx = 0
+    while idx < max_subredes:
+        comp = lt.get_element(components_sorted, idx)
+        comp_id = comp["id_subred"]
         comp_vertices = comp["vertices"]
         num_vertices = lt.size(comp_vertices)
 
@@ -1427,15 +1442,15 @@ def req_6(catalog):
         min_lon = None
         max_lon = None
 
-       
-        tags_seen = mp.new_map(23000, 0.5)
-        tags_list = lt.new_list()   
-        total_individuos = 0
-
         
-        i = 0
-        while i < num_vertices:
-            vid = lt.get_element(comp_vertices, i)
+        tags_seen = mp.new_map(23000, 0.5)
+        tags_order_tda = lt.new_list()
+        total_individuals = 0
+
+       
+        i_v = 0
+        while i_v < num_vertices:
+            vid = lt.get_element(comp_vertices, i_v)
             vinfo = mp.get(vertices_info, vid)
 
             if vinfo is not None:
@@ -1460,14 +1475,13 @@ def req_6(catalog):
                     tag = lt.get_element(tags_list_v, j)
                     if not mp.contains(tags_seen, tag):
                         mp.put(tags_seen, tag, True)
-                        lt.add_last(tags_list, tag)
-                        total_individuos += 1
+                        lt.add_last(tags_order_tda, tag)
+                        total_individuals += 1
                     j += 1
 
-            i += 1
+            i_v += 1
 
         
-
         first_points = lt.new_list()
         last_points  = lt.new_list()
 
@@ -1475,10 +1489,10 @@ def req_6(catalog):
         if limit_pts > num_vertices:
             limit_pts = num_vertices
 
-        
-        i = 0
-        while i < limit_pts:
-            vid = lt.get_element(comp_vertices, i)
+       
+        i_pt = 0
+        while i_pt < limit_pts:
+            vid = lt.get_element(comp_vertices, i_pt)
             vinfo = mp.get(vertices_info, vid)
 
             if vinfo is not None:
@@ -1495,12 +1509,12 @@ def req_6(catalog):
                 }
 
             lt.add_last(first_points, entry)
-            i += 1
+            i_pt += 1
 
         
-        i = num_vertices - limit_pts
-        while i < num_vertices:
-            vid = lt.get_element(comp_vertices, i)
+        i_pt = num_vertices - limit_pts
+        while i_pt < num_vertices:
+            vid = lt.get_element(comp_vertices, i_pt)
             vinfo = mp.get(vertices_info, vid)
 
             if vinfo is not None:
@@ -1517,10 +1531,10 @@ def req_6(catalog):
                 }
 
             lt.add_last(last_points, entry)
-            i += 1
+            i_pt += 1
 
         
-        tags_sample = tags_first_last_3(tags_list)
+        tags_sample = tags_first_last_3(tags_order_tda)
 
         
         subred_info = {
@@ -1530,23 +1544,28 @@ def req_6(catalog):
             "max_lat": max_lat if max_lat is not None else "Unknown",
             "min_lon": min_lon if min_lon is not None else "Unknown",
             "max_lon": max_lon if max_lon is not None else "Unknown",
-            "first_points": first_points,  
-            "last_points": last_points,     
-            "total_individuals": total_individuos,
-            "tags_sample": tags_sample      # string con 3 primeros / 3 últimos tags
+            "total_individuals": total_individuals,
+            "tags_sample": tags_sample,
+            "first_points": first_points,   
+            "last_points": last_points      
         }
 
         lt.add_last(subredes_top, subred_info)
-        idx_comp += 1
+        idx += 1
 
-    # 4. Resultado final
-    result = {
-        "success": True,
+    end = get_time()
+    delta = delta_time(start, end)
+
+    resultado = {
+        "ok": True,
+        "mensaje": (f"Se identificaron {total_components} subredes hídricas "
+                    "dentro del nicho biológico."),
         "total_subredes": total_components,
-        "subredes_top": subredes_top    
+        "subredes_top": subredes_top,   #
+        "tiempo_ms": delta
     }
 
-    return result
+    return resultado
 
 # Funciones para medir tiempos de ejecucion
 

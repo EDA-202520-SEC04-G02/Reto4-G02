@@ -213,7 +213,74 @@ def print_req_5(control):
         Función que imprime la solución del Requerimiento 5 en consola
     """
     # TODO: Imprimir el resultado del requerimiento 5
-    pass
+    print("\n=== REQ. 5: Ruta migratoria más eficiente entre dos puntos ===")
+
+    lat_o = float(input("Latitud del punto de origen: "))
+    lon_o = float(input("Longitud del punto de origen: "))
+    lat_d = float(input("Latitud del punto de destino: "))
+    lon_d = float(input("Longitud del punto de destino: "))
+
+    print("\nSeleccione el tipo de grafo a usar:")
+    print("1. Grafo por distancia de desplazamiento")
+    print("2. Grafo por distancia a fuentes hídricas")
+    opcion = input("Opción (1/2): ").strip()
+
+    if opcion == "2":
+        tipo_grafo = "agua"
+    else:
+        tipo_grafo = "dist"
+
+    result = logic.req_5(control, lat_o, lon_o, lat_d, lon_d, tipo_grafo)
+
+    # Mensaje principal
+    mensaje = result.get("mensaje", "Sin mensaje disponible.")
+    print("\n" + mensaje)
+
+    # Tiempo de ejecución
+    if "tiempo_ms" in result:
+        print(f"Tiempo de ejecución REQ.5: {result['tiempo_ms']:.3f} ms")
+
+    # Si hubo error o no hay ruta
+    if not result.get("ok", False):
+        print(f"Punto migratorio de origen (más cercano): {result.get('origen', 'Unknown')}")
+        print(f"Punto migratorio de destino (más cercano): {result.get('destino', 'Unknown')}")
+        return
+
+    print(f"\nPunto migratorio de origen (más cercano): {result.get('origen', 'Unknown')}")
+    print(f"Punto migratorio de destino (más cercano): {result.get('destino', 'Unknown')}")
+    print(f"Métrica usada: {result.get('metrica', 'Unknown')}")
+    print(f"Costo total del camino: {result.get('costo_total', 0.0)}")
+    print(f"Total de puntos en la ruta: {result.get('total_puntos', 0)}")
+    print(f"Total de segmentos en la ruta: {result.get('total_segmentos', 0)}")
+
+    # ----- Convertir ruta_completa (TDA) a lista de Python -----
+    ruta_tda = result.get("ruta_completa", lt.new_list())
+    total = lt.size(ruta_tda)
+
+    if total == 0:
+        print("\nNo hay detalles de ruta para mostrar.")
+        return
+
+    ruta_py = []
+    i = 0
+    while i < total:
+        fila = lt.get_element(ruta_tda, i)
+        ruta_py.append(fila)
+        i += 1
+
+    # 5 primeros y 5 últimos
+    n = 5
+    if n > total:
+        n = total
+
+    primeros = ruta_py[0:n]
+    ultimos = ruta_py[-n:]
+
+    print("\n--- Primeros 5 vértices de la ruta ---\n")
+    print(tabulate(primeros, headers="keys", tablefmt="grid"))
+
+    print("\n--- Últimos 5 vértices de la ruta ---\n")
+    print(tabulate(ultimos, headers="keys", tablefmt="grid"))
 
 
 def print_req_6(control):
@@ -221,7 +288,80 @@ def print_req_6(control):
         Función que imprime la solución del Requerimiento 6 en consola
     """
     # TODO: Imprimir el resultado del requerimiento 6
-    pass
+    
+    print("\n=== REQ. 6: Subredes hídricas aisladas (Componentes Conexas) ===")
+
+    result = logic.req_6(control)
+
+    # Mensaje principal
+    mensaje = result.get("mensaje", "Sin mensaje disponible.")
+    print("\n" + mensaje)
+
+    # Tiempo de ejecución
+    if "tiempo_ms" in result:
+        print(f"Tiempo de ejecución REQ.6: {result['tiempo_ms']:.3f} ms")
+
+    # Caso error / no hay subredes
+    if not result.get("ok", False):
+        print(f"Total de subredes identificadas: {result.get('total_subredes', 0)}")
+        return
+
+    print(f"Total de subredes hídricas identificadas: {result.get('total_subredes', 0)}")
+
+    subredes = result.get("subredes_top", lt.new_list())
+    n_sub = lt.size(subredes)
+
+    if n_sub == 0:
+        print("\nNo se encontraron subredes hídricas viables.")
+        return
+
+    print("\n=== Las 5 subredes hídricas más grandes ===")
+
+    i = 0
+    while i < n_sub:
+        sub = lt.get_element(subredes, i)
+
+        print(f"\n--- Subred #{i+1} (ID = {sub.get('id_subred', 'Unknown')}) ---")
+        print(f"Número de puntos migratorios: {sub.get('num_vertices', 'Unknown')}")
+        print(f"Latitud mínima:  {sub.get('min_lat', 'Unknown')}")
+        print(f"Latitud máxima:  {sub.get('max_lat', 'Unknown')}")
+        print(f"Longitud mínima: {sub.get('min_lon', 'Unknown')}")
+        print(f"Longitud máxima: {sub.get('max_lon', 'Unknown')}")
+        print(f"Total de individuos en la subred: {sub.get('total_individuals', 'Unknown')}")
+        print(f"Tags (3 primeros y 3 últimos): {sub.get('tags_sample', 'Unknown')}")
+
+        # ---- Primeros 3 puntos migratorios ----
+        print("\n> Primeros 3 puntos migratorios:")
+        primeros_tda = sub.get("first_points", lt.new_list())
+        primeros_py = []
+        n_prim = lt.size(primeros_tda)
+        j = 0
+        while j < n_prim:
+            primeros_py.append(lt.get_element(primeros_tda, j))
+            j += 1
+
+        if primeros_py:
+            print(tabulate(primeros_py, headers="keys", tablefmt="grid"))
+        else:
+            print("No hay puntos para mostrar.")
+
+        # ---- Últimos 3 puntos migratorios ----
+        print("\n> Últimos 3 puntos migratorios:")
+        ultimos_tda = sub.get("last_points", lt.new_list())
+        ultimos_py = []
+        n_ult = lt.size(ultimos_tda)
+        j = 0
+        while j < n_ult:
+            ultimos_py.append(lt.get_element(ultimos_tda, j))
+            j += 1
+
+        if ultimos_py:
+            print(tabulate(ultimos_py, headers="keys", tablefmt="grid"))
+        else:
+            print("No hay puntos para mostrar.")
+
+        i += 1
+
 
 # Se crea la lógica asociado a la vista
 control = new_logic()
